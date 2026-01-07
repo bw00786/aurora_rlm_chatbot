@@ -1,0 +1,27 @@
+# FastAPI and Web Server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Vector Database and Embeddings
+chromadb
+sentence-transformers
+
+# PDF Processing
+PyPDF2
+
+# HTTP Requests
+requests
+
+# Data Validation
+pydantic
+
+# Additional Dependencies
+numpy
+typing-extensions
+
+# Optional: For production deployment
+gunicorn
+
+# Optional: For logging and monitoring
+python-json-logger
