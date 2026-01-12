@@ -3,23 +3,29 @@ import {
   Toolbar,
   Typography,
   IconButton,
-  Stack,
+  Switch,
+  Tooltip,
   Chip
 } from "@mui/material";
-import {
-  Upload,
-  Delete,
-  Brightness4,
-  Brightness7,
-  HealthAndSafety
-} from "@mui/icons-material";
+import PsychologyIcon from "@mui/icons-material/Psychology";
+import DeleteIcon from "@mui/icons-material/Delete";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import CircleIcon from "@mui/icons-material/Circle";
 import { HealthStatus } from "../types/chat";
+
+
 
 interface Props {
   health?: HealthStatus;
   darkMode: boolean;
   onToggleTheme: () => void;
-  onUpload: () => void;
+
+  /* ✅ ADD THESE */
+  recursive: boolean;
+  onToggleRecursive: () => void;
+  onOpenPlanner: () => void;
+
+  onUpload?: () => void;
   onClear: () => void;
 }
 
@@ -27,37 +33,68 @@ export function Header({
   health,
   darkMode,
   onToggleTheme,
+  recursive,
+  onToggleRecursive,
+  onOpenPlanner,
   onUpload,
   onClear
 }: Props) {
   return (
-    <AppBar position="static" color="default" elevation={1}>
+    <AppBar position="static" elevation={1}>
       <Toolbar>
+        {/* Title */}
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          RAG Chatbot
+          Aurora RAG Chat
         </Typography>
 
-        <Stack direction="row" spacing={1} alignItems="center">
-          {health && (
-            <Chip
-              icon={<HealthAndSafety />}
-              label={`${health.ollama} · ${health.documents_count ?? 0}`}
-              color={health.status === "healthy" ? "success" : "error"}
-            />
-          )}
+        {/* Health */}
+        {health && (
+          <Chip
+            size="small"
+            icon={
+              <CircleIcon
+                sx={{
+                 color: health.status === "healthy" ? "limegreen" : "red"
+                }}
+              />
+            }
+            label={health.status.toUpperCase()}
+            sx={{ mr: 2 }}
+          />
+        )}
 
-          <IconButton onClick={onUpload}>
-            <Upload />
-          </IconButton>
+        {/* Recursive reasoning toggle */}
+        <Tooltip title="Recursive reasoning">
+          <Switch checked={recursive} onChange={onToggleRecursive} />
+        </Tooltip>
 
-          <IconButton color="error" onClick={onClear}>
-            <Delete />
+        {/* Planner / agent view */}
+        <Tooltip title="Planner / Agent view">
+          <IconButton onClick={onOpenPlanner} color="inherit">
+            <PsychologyIcon />
           </IconButton>
+        </Tooltip>
 
-          <IconButton onClick={onToggleTheme}>
-            {darkMode ? <Brightness7 /> : <Brightness4 />}
+        {/* Upload */}
+        {onUpload && (
+          <Tooltip title="Upload PDFs">
+            <IconButton onClick={onUpload} color="inherit">
+              <CloudUploadIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+
+        {/* Clear */}
+        <Tooltip title="Clear conversation">
+          <IconButton onClick={onClear} color="inherit">
+            <DeleteIcon />
           </IconButton>
-        </Stack>
+        </Tooltip>
+
+        {/* Dark mode */}
+        <Tooltip title="Toggle theme">
+          <Switch checked={darkMode} onChange={onToggleTheme} />
+        </Tooltip>
       </Toolbar>
     </AppBar>
   );

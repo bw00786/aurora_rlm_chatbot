@@ -30,5 +30,6 @@ export function ReasoningDrawer({
         ))}
       </Box>
     </Drawer>
+    
   );
 }

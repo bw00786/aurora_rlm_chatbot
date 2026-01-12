@@ -7,6 +7,11 @@ export interface ReasoningStep {
   query?: string;
 }
 
+export type HealthStatus = {
+  status: "healthy" | "error";
+};
+
+
 export interface ChatMessage {
   role: Role;
   content: string;
@@ -14,8 +19,6 @@ export interface ChatMessage {
   sources?: string[];
 }
 
-export interface HealthStatus {
-  status: "healthy" | "error";
-  ollama: string;
-  documents_count: number;
-}
+
+
+

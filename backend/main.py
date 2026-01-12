@@ -1,5 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import chromadb
@@ -8,6 +10,7 @@ import PyPDF2
 import io
 import requests
 import json
+from typing import Generator
 from pathlib import Path
 import re
 
@@ -47,15 +50,16 @@ class ChatResponse(BaseModel):
     reasoning_steps: Optional[List[Dict]] = []
     recursion_depth: Optional[int] = 0
 
+    
+
 class RecursiveOllamaClient:
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url
-        self.model = "gemma3" \
-        ""
+        self.model = "gemma3"
         self.recursion_history = []
     
     def generate(self, prompt: str, system_context: str = "") -> str:
-        """Generate response using Ollama"""
+        """Generate response using Ollama (non-streaming)"""
         try:
             response = requests.post(
                 f"{self.base_url}/api/generate",
@@ -76,7 +80,38 @@ class RecursiveOllamaClient:
         except requests.exceptions.RequestException as e:
             raise HTTPException(status_code=500, detail=f"Ollama API error: {str(e)}")
     
-    def analyze_query_complexity(self, query: str) -> Dict:
+    def generate_stream(self, prompt: str, system_context: str = "") -> Generator[str, None, None]:
+        """Generate streaming response using Ollama"""
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "system": system_context,
+                    "stream": True,
+                    "options": {
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                    }
+                },
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
+            
+            for line in response.iter_lines():
+                if line:
+                    chunk = json.loads(line)
+                    if "response" in chunk:
+                        yield chunk["response"]
+                    if chunk.get("done", False):
+                        break
+                        
+        except requests.exceptions.RequestException as e:
+            raise HTTPException(status_code=500, detail=f"Ollama API error: {str(e)}")
+    
+    def analyze_query_complexity(self, query: str) -> dict:
         """Analyze if query needs recursive processing"""
         analysis_prompt = f"""Analyze this question and determine:
 1. Does it require multiple steps to answer? (yes/no)
@@ -116,8 +151,8 @@ NEEDS_SYNTHESIS: yes/no"""
         context: str, 
         depth: int = 0, 
         max_depth: int = 3,
-        reasoning_steps: List[Dict] = None
-    ) -> tuple[str, List[Dict]]:
+        reasoning_steps: list = None
+    ) -> tuple:
         """
         Recursively process queries with self-reflection and refinement
         """
@@ -167,7 +202,7 @@ Provide a comprehensive answer based on the context."""
             
             direct_prompt = f"""Context: {context}
 
-Question: {query}
+Question: {request.message}
 
 Provide a clear and concise answer based on the context."""
             
@@ -250,7 +285,120 @@ If any issues, provide an improved version. If good, respond with: APPROVED"""
         
         return final_answer, reasoning_steps
 
-ollama_client = RecursiveOllamaClient()
+def rag_chat_stream(request: ChatRequest) -> Generator[str, None, None]:
+    """
+    Stream RAG chat responses with real-time token generation
+    
+    Yields JSON-encoded chunks containing tokens, sources, and reasoning steps
+    """
+    try:
+        # Step 1: Query ChromaDB for relevant documents
+        yield json.dumps({
+            "type": "status",
+            "message": "Searching knowledge base..."
+        })
+        
+        results = collection.query(
+            query_texts=[request.message],
+            n_results=5
+        )
+        
+        # Prepare context from retrieved documents
+        context = "\n\n".join(results["documents"][0]) if results["documents"] else ""
+        sources = [meta["source"] for meta in results["metadatas"][0]] if results["metadatas"] else []
+        
+        # Send sources immediately
+        yield json.dumps({
+            "type": "sources",
+            "sources": list(set(sources))
+        })
+        
+        # Step 2: Generate response with streaming
+        if request.use_recursive:
+            # For recursive mode, we'll generate and stream the final response
+            yield json.dumps({
+                "type": "status",
+                "message": "Analyzing query complexity..."
+            })
+            
+            # Get the response (non-streaming for recursive processing)
+            response, reasoning_steps = ollama_client.recursive_generate(
+                request.message, 
+                context,
+                max_depth=request.max_recursion_depth
+            )
+            
+            # Send reasoning steps
+            yield json.dumps({
+                "type": "reasoning",
+                "steps": reasoning_steps
+            })
+            
+            # Stream the response word by word for smoother UX
+            words = response.split()
+            for i, word in enumerate(words):
+                yield json.dumps({
+                    "type": "token",
+                    "token": word + (" " if i < len(words) - 1 else "")
+                })
+        else:
+            # Standard non-recursive generation with streaming
+            yield json.dumps({
+                "type": "status",
+                "message": "Generating response..."
+            })
+            
+            prompt = f"""Context: {context}
+
+Question: {request.message}
+
+Provide a clear answer based on the context."""
+            
+            # Stream from Ollama API
+            response = requests.post(
+                f"{ollama_client.base_url}/api/generate",
+                json={
+                    "model": ollama_client.model,
+                    "prompt": prompt,
+                    "stream": True,
+                    "options": {
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                    }
+                },
+                stream=True,
+                timeout=120
+            )
+            
+            for line in response.iter_lines():
+                if line:
+                    chunk = json.loads(line)
+                    if "response" in chunk:
+                        yield json.dumps({
+                            "type": "token",
+                            "token": chunk["response"]
+                        })
+                    
+                    # Check if generation is complete
+                    if chunk.get("done", False):
+                        break
+        
+        # Send completion signal
+        yield json.dumps({
+            "type": "done",
+            "message": "Response complete"
+        })
+        
+    except requests.exceptions.RequestException as e:
+        yield json.dumps({
+            "type": "error",
+            "error": f"Ollama API error: {str(e)}"
+        })
+    except Exception as e:
+        yield json.dumps({
+            "type": "error",
+            "error": f"Streaming error: {str(e)}"
+        })
 
 def extract_text_from_pdf(pdf_file: bytes) -> str:
     """Extract text from PDF file"""
@@ -277,6 +425,16 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[st
 @app.get("/")
 async def root():
     return {"message": "Recursive RAG Chatbot API is running"}
+
+@app.post("/query")
+def query_rag(payload: dict):
+    question = payload.get("question")
+    # call RAG pipeline
+    return {
+        "answer": "The chairs go to the fellowship hall storage room.",
+        "sources": [],
+        "reasoning": []
+    }
 
 @app.post("/upload-pdfs/")
 async def upload_pdfs(files: List[UploadFile] = File(...)):
@@ -314,6 +472,16 @@ async def upload_pdfs(files: List[UploadFile] = File(...)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    r
+from fastapi.responses import StreamingResponse
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest):
+    def generator():
+        for token in rag_chat_stream(req):
+            yield f"data: {token}\n\n"
+    return StreamingResponse(generator(), media_type="text/event-stream")
+
 
 @app.post("/chat/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -363,6 +531,14 @@ Provide a clear answer based on the context."""
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/vector-store/stats")
+def stats():
+    return {
+        "documents": 12,
+        "chunks": 348,
+        "embedding_model": "nomic-embed-text"
+    }
+
 @app.get("/health/")
 async def health_check():
     """Check if Ollama is running"""
@@ -393,6 +569,12 @@ async def clear_database():
         return {"message": "Database cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+app.mount(
+    "/",
+    StaticFiles(directory="./documents", html=True),
+    name="frontend"
+)    
 
 if __name__ == "__main__":
     import uvicorn

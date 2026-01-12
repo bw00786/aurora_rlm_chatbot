@@ -1,51 +1,62 @@
-import { Box, Paper, Typography, Fade, Collapse } from "@mui/material";
-import { ChatMessage } from "../types/chat";
+import { Box, Typography, Chip } from "@mui/material";
+import { motion } from "framer-motion";
+import { ChatMessage } from "../store/chatStore";
 
 interface Props {
   messages: ChatMessage[];
-  showReasoning: boolean;
+  onShowReasoning?: (steps: any[]) => void;
+  onOpenSource?: (source: any) => void;
 }
 
-export function MessageList({ messages, showReasoning }: Props) {
+export default function MessageList({
+  messages,
+  onShowReasoning,
+  onOpenSource
+}: Props) {
   return (
-    <Box sx={{ p: 3, overflowY: "auto", flex: 1 }}>
-      {messages.map((msg, i) => (
-        <Fade in key={i} timeout={400}>
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
-              mb: 2
-            }}
-          >
-            <Paper
-              sx={{
-                p: 2,
-                maxWidth: "70%",
-                bgcolor: msg.role === "user" ? "primary.main" : "background.paper",
-                color: msg.role === "user" ? "white" : "text.primary"
-              }}
-            >
-              <Typography whiteSpace="pre-wrap">
-                {msg.content}
-              </Typography>
+    <Box px={2} pb={10}>
+      {messages.map((m, i) => (
+        <Box
+          key={i}
+          component={motion.div}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          mb={2}
+          p={2}
+          maxWidth="85%"
+          alignSelf={m.role === "user" ? "flex-end" : "flex-start"}
+          borderRadius={3}
+          bgcolor={m.role === "user" ? "primary.main" : "grey.100"}
+          color={m.role === "user" ? "white" : "black"}
+        >
+          <Typography whiteSpace="pre-wrap">
+            {m.content}
+          </Typography>
 
-              <Collapse in={showReasoning && !!msg.reasoning_steps?.length}>
-                <Box mt={2}>
-                  <Typography variant="caption" fontWeight="bold">
-                    Reasoning
-                  </Typography>
-                  {msg.reasoning_steps?.map((r, j) => (
-                    <Typography key={j} variant="caption" display="block">
-                      • {r.type}
-                    </Typography>
-                  ))}
-                </Box>
-              </Collapse>
-            </Paper>
-          </Box>
-        </Fade>
+          {/* ---------- Reasoning ---------- */}
+          {m.reasoning && onShowReasoning && (
+            <Chip
+              size="small"
+              label="View reasoning"
+              sx={{ mt: 1 }}
+              onClick={() => onShowReasoning(m.reasoning!)}
+            />
+          )}
+
+          {/* ---------- Sources ---------- */}
+          {m.sources?.map((s, idx) => (
+            <Chip
+              key={idx}
+              size="small"
+              label={`Source ${idx + 1}`}
+              sx={{ mt: 1, ml: 1 }}
+              onClick={() => onOpenSource?.(s)}
+            />
+          ))}
+        </Box>
       ))}
     </Box>
   );
 }
+

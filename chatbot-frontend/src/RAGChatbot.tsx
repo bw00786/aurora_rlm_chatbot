@@ -4,9 +4,9 @@ import { ThemeProvider } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Header } from "./components/Header";
-import { MessageList } from "./components/MessageList";
-import { ChatInput } from "./components/ChatInput";
-import { getTheme } from "./theme/theme";
+import MessageList from "./components/MessageList";
+import ChatInput from "./components/ChatInput";
+import { getTheme } from "./theme/gettheme";
 import { ChatMessage } from "./types/chat";
 import { useChat, useHealth } from "./hooks/useChatApi";
 
@@ -18,9 +18,16 @@ export default function RAGChatbot() {
   const [input, setInput] = useState("");
   const [showReasoning] = useState(true);
   const [snack, setSnack] = useState<string | null>(null);
+  const [plannerOpen, setPlannerOpen] = useState(false);
+
+  
+  /* ---------------- Recursive Reasoning ---------------- */
+  const [recursive, setRecursive] = useState(true);
+  
 
   const health = useHealth();
   const chat = useChat();
+  const clear = () => setMessages([]);
 
   const send = async () => {
     const userMsg: ChatMessage = { role: "user", content: input };
@@ -51,15 +58,19 @@ export default function RAGChatbot() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={getTheme(darkMode ? "dark" : "light")}>
         <Box sx={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-          <Header
-            health={health.data}
-            darkMode={darkMode}
-            onToggleTheme={() => setDarkMode(!darkMode)}
-            onUpload={() => setSnack("Upload not wired yet")}
-            onClear={() => setMessages([])}
+         <Header
+           health={health.data}
+           darkMode={darkMode}
+           onToggleTheme={() => setDarkMode(!darkMode)}
+           recursive={recursive}
+           onToggleRecursive={() => setRecursive((r) => !r)}
+           onOpenPlanner={() => setPlannerOpen(true)}
+           onUpload={() => setSnack("Upload not wired yet")}
+           onClear={clear}
           />
 
-          <MessageList messages={messages} showReasoning={showReasoning} />
+
+          <MessageList messages={messages} />
 
           <ChatInput
             value={input}

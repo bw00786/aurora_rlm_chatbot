@@ -1,52 +1,21 @@
-import {
-  Box,
-  IconButton,
-  TextField,
-  Stack
-} from "@mui/material";
-import { Send, Mic, MicOff } from "@mui/icons-material";
+import { Box, IconButton, TextField } from "@mui/material";
+import { useState } from "react";
+import SendIcon from "@mui/icons-material/Send";
+import MicIcon from "@mui/icons-material/Mic";
+import { useSpeech } from "../hooks/useSpeech";
 
-interface Props {
-  value: string;
-  isListening: boolean;
-  disabled: boolean;
-  onChange: (v: string) => void;
-  onSend: () => void;
-  onMic: () => void;
+
+export default function ChatInput({ onSend }: any) {
+const [text, setText] = useState("");
+const speech = useSpeech(setText);
+
+
+return (
+<Box display="flex" gap={1} p={2} position="fixed" bottom={0} width="100%" bgcolor="background.paper">
+<IconButton onClick={speech.start}><MicIcon /></IconButton>
+<TextField fullWidth value={text} onChange={e => setText(e.target.value)} placeholder="Type your message or use voice..." />
+<IconButton onClick={() => onSend(text)}><SendIcon /></IconButton>
+</Box>
+);
 }
 
-export function ChatInput({
-  value,
-  isListening,
-  disabled,
-  onChange,
-  onSend,
-  onMic
-}: Props) {
-  return (
-    <Box sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2}>
-        <IconButton color={isListening ? "error" : "default"} onClick={onMic}>
-          {isListening ? <MicOff /> : <Mic />}
-        </IconButton>
-
-        <TextField
-          fullWidth
-          multiline
-          maxRows={4}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Type your message…"
-        />
-
-        <IconButton
-          color="primary"
-          disabled={disabled || !value.trim()}
-          onClick={onSend}
-        >
-          <Send />
-        </IconButton>
-      </Stack>
-    </Box>
-  );
-}

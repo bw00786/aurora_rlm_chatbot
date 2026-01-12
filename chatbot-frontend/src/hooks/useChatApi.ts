@@ -15,6 +15,39 @@ export function useHealth() {
   });
 }
 
+export function useStreamingChat() {
+  const stream = async (
+    payload: any,
+    onToken: (t: string) => void,
+    onDone: () => void
+  ) => {
+    const res = await fetch("http://localhost:8000/chat/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value);
+      buffer.split("\n\n").forEach((line) => {
+        if (line.startsWith("data: ")) {
+          onToken(line.replace("data: ", ""));
+        }
+      });
+      buffer = "";
+    }
+    onDone();
+  };
+
+  return { stream };
+}
+
 export function useChat() {
   return useMutation({
     mutationFn: async (payload: {
