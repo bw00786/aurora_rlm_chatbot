@@ -1,43 +1,56 @@
+
+// src/store/chatStore.ts
+
 import { create } from "zustand";
+import { ChatMessage, ReasoningStep } from "../types/chat";
 
-export type Role = "user" | "assistant";
-
-export interface ChatMessage {
-  role: Role;
-  content: string;
-  reasoning?: any[];
-  sources?: any[];
-}
-
-interface ChatState {
+interface ChatStore {
   messages: ChatMessage[];
-  addMessage: (m: ChatMessage) => void;
-  updateLastAssistant: (
-    content: string,
-    meta?: Partial<ChatMessage>
-  ) => void;
-  clear: () => void; // ✅ ADD THIS
+  isStreaming: boolean;
+  recursive: boolean;
+  darkMode: boolean;
+  
+  addMessage: (message: ChatMessage) => void;
+  updateLastMessage: (content: string, sources?: string[], reasoning?: ReasoningStep[]) => void;
+  clearMessages: () => void;
+  setStreaming: (streaming: boolean) => void;
+  toggleRecursive: () => void;
+  toggleDarkMode: () => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatStore>((set) => ({
   messages: [],
+  isStreaming: false,
+  recursive: true,
+  darkMode: false,
 
-  addMessage: (m) =>
+  addMessage: (message) =>
     set((state) => ({
-      messages: [...state.messages, m]
+      messages: [...state.messages, message],
     })),
 
-  updateLastAssistant: (content, meta) =>
+  updateLastMessage: (content, sources, reasoning) =>
     set((state) => {
       const messages = [...state.messages];
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "assistant") {
-          messages[i] = { ...messages[i], content, ...meta };
-          break;
-        }
+      const lastIndex = messages.length - 1;
+      if (lastIndex >= 0) {
+        messages[lastIndex] = {
+          ...messages[lastIndex],
+          content,
+          ...(sources && { sources }),
+          ...(reasoning && { reasoning_steps: reasoning }),
+        };
       }
       return { messages };
     }),
 
-  clear: () => set({ messages: [] }) // ✅ IMPLEMENTATION
+  clearMessages: () => set({ messages: [] }),
+
+  setStreaming: (streaming) => set({ isStreaming: streaming }),
+
+  toggleRecursive: () => set((state) => ({ recursive: !state.recursive })),
+
+  toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
 }));
+
+export type { ChatMessage };

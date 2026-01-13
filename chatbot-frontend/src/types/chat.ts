@@ -1,16 +1,21 @@
+// src/types/chat.ts
+
 export type Role = "user" | "assistant";
 
 export interface ReasoningStep {
-  type: string;
-  depth?: number;
+  depth: number;
+  type: "analysis" | "direct_answer" | "sub_question" | "synthesis" | "refinement" | "final_answer";
+  query: string;
   action?: string;
-  query?: string;
+  needs_recursion?: boolean;
+  sub_questions?: string[];
 }
 
-export type HealthStatus = {
-  status: "healthy" | "error";
-};
-
+export interface HealthStatus {
+  status: "healthy" | "unhealthy";
+  ollama: "running" | "not running";
+  documents_count: number;
+}
 
 export interface ChatMessage {
   role: Role;
@@ -19,6 +24,11 @@ export interface ChatMessage {
   sources?: string[];
 }
 
-
-
-
+export interface StreamChunk {
+  type: "status" | "sources" | "reasoning" | "token" | "done" | "error";
+  message?: string;
+  sources?: string[];
+  steps?: ReasoningStep[];
+  token?: string;
+  error?: string;
+}

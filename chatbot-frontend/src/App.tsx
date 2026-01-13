@@ -1,214 +1,317 @@
-import { useState } from "react";
-import { useRef } from "react";
-import { usePdfUpload } from "./hooks/usePdfUpload";
-import { Snackbar } from "@mui/material";
+// src/App.tsx
 
+import { useState, useEffect, useRef } from "react";
 import {
   ThemeProvider,
+  createTheme,
   CssBaseline,
-  Box
+  Box,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
-import { lightTheme, darkTheme } from "./theme/theme";
-
 import { Header } from "./components/Header";
 import MessageList from "./components/MessageList";
 import ChatInput from "./components/ChatInput";
 import { ReasoningDrawer } from "./components/ReasoningDrawer";
 import PlannerDrawer from "./components/PlannerDrawer";
-import PdfDrawer from "./components/PdfDrawer";
-import { HealthStatus } from "./types/chat";
-import { useChatStore } from "./store/chatStore";
-import { useChat, useHealth } from "./hooks/useChatApi";
-import { useStreamingChat } from "./hooks/useStreamingChat";
+import { EmptyState } from "./components/EmptyState";
+import { streamChat, getHealth, clearDatabase } from "./api/chatApi";
+import { ChatMessage } from "./types/chat";
+import { PdfUploadButton } from "./components/PdfUploadButton";
 
 const queryClient = new QueryClient();
 
-export default function App() {
-  /* ---------------- Theme ---------------- */
+function App() {
   const [darkMode, setDarkMode] = useState(false);
-
-  /* ---------------- Recursive Reasoning ---------------- */
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const [recursive, setRecursive] = useState(true);
-  const [snack, setSnack] = useState<string | null>(null);
-  const health = useHealth();
- 
-
-  /* ---------------- Drawers ---------------- */
-  const [reasoningOpen, setReasoningOpen] = useState(false);
-  const [plannerOpen, setPlannerOpen] = useState(false);
-  const [pdfOpen, setPdfOpen] = useState(false);
+  const [health, setHealth] = useState<any>(null);
   
-
-  /* ---------------- Drawer Data ---------------- */
-  const [activeReasoning, setActiveReasoning] = useState<any[]>([]);
-  const [plan, setPlan] = useState<string[]>([]);
-  const [agentSteps, setAgentSteps] = useState<any[]>([]);
-  const [pdfState, setPdfState] = useState({
-    pdfUrl: "",
-    page: 1,
-    chunkText: ""
-  });
-
-  /* ---------------- Chat Store ---------------- */
-  const {
-    messages,
-    addMessage,
-    updateLastAssistant,
-    clear
-  } = useChatStore();
-
-  /* ---------------- Streaming Hook ---------------- */
-  const { stream } = useStreamingChat();
-  const fileInputRef = useRef<HTMLInputElement>(null);
- const uploadMutation = usePdfUpload();
-
-
+  // Drawers
+  const [reasoningDrawerOpen, setReasoningDrawerOpen] = useState(false);
+  const [plannerDrawerOpen, setPlannerDrawerOpen] = useState(false);
+  const [currentReasoning, setCurrentReasoning] = useState<any[]>([]);
   
+  // Snackbar
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error" | "info";
+  }>({ open: false, message: "", severity: "info" });
 
-  /* ---------------- Send Message ---------------- */
-  const handleSend = async (text: string) => {
-    if (!text.trim()) return;
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // User message
-    addMessage({ role: "user", content: text });
-
-    // Empty assistant for streaming
-    addMessage({ role: "assistant", content: "" });
-
-    let accumulated = "";
-
-    await stream(
-      {
-        message: text,
-        use_recursive: recursive,
-        history: messages.map(({ role, content }) => ({ role, content }))
+  const theme = createTheme({
+    palette: {
+      mode: darkMode ? "dark" : "light",
+      primary: {
+        main: "#667eea",
       },
-      (token: string) => {
-        accumulated += token;
-        updateLastAssistant(accumulated);
+      secondary: {
+        main: "#764ba2",
       },
-      (finalData: any) => {
-        updateLastAssistant(accumulated, {
-          reasoning: finalData.reasoning_steps,
-          sources: finalData.sources
-        });
-
-        setActiveReasoning(finalData.reasoning_steps || []);
-        setPlan(finalData.plan || []);
-        setAgentSteps(finalData.steps || []);
-      }
-    );
-  };
-  const handleUploadClick = () => {
-  fileInputRef.current?.click();
-};
-
-const handleFilesSelected = (files: FileList | null) => {
-  if (!files || files.length === 0) return;
-
-  uploadMutation.mutate(Array.from(files), {
-
-    onSuccess: () => {
-      setSnack("PDFs uploaded and indexed successfully");
     },
-    onError: () => {
-      setSnack("PDF upload failed");
-    }
   });
-};
 
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  /* ---------------- PDF Source Open ---------------- */
-  const openPdf = (source: any) => {
-    setPdfState({
-      pdfUrl: `/pdfs/${source.doc_id}`,
-      page: source.page,
-      chunkText: source.text
+  // Check health on mount
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const status = await getHealth();
+        setHealth(status);
+      } catch (error) {
+        console.error("Health check failed:", error);
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || isStreaming) return;
+
+    // Clear input immediately
+    setInput("");
+
+    // Add user message
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: text,
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    // Create placeholder for assistant message
+    const assistantMessageIndex = messages.length + 1;
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content: "",
+      sources: [],
+      reasoning_steps: [],
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    setIsStreaming(true);
+
+    try {
+      let accumulatedText = "";
+      let sources: string[] = [];
+      let reasoning: any[] = [];
+
+      await streamChat(text, recursive, 3, {
+        onStatus: (status) => {
+          console.log("Status:", status);
+        },
+        onSources: (srcs) => {
+          sources = srcs;
+          setMessages((prev) => {
+            const updated = [...prev];
+            if (updated[assistantMessageIndex]) {
+              updated[assistantMessageIndex] = {
+                ...updated[assistantMessageIndex],
+                sources: srcs,
+              };
+            }
+            return updated;
+          });
+        },
+        onReasoning: (steps) => {
+          reasoning = steps;
+          setMessages((prev) => {
+            const updated = [...prev];
+            if (updated[assistantMessageIndex]) {
+              updated[assistantMessageIndex] = {
+                ...updated[assistantMessageIndex],
+                reasoning_steps: steps,
+              };
+            }
+            return updated;
+          });
+        },
+        onToken: (token) => {
+          accumulatedText += token;
+          setMessages((prev) => {
+            const updated = [...prev];
+            if (updated[assistantMessageIndex]) {
+              updated[assistantMessageIndex] = {
+                ...updated[assistantMessageIndex],
+                content: accumulatedText,
+              };
+            }
+            return updated;
+          });
+        },
+        onDone: () => {
+          console.log("Streaming complete");
+        },
+        onError: (error) => {
+          setSnackbar({
+            open: true,
+            message: `Error: ${error}`,
+            severity: "error",
+          });
+        },
+      });
+    } catch (error: any) {
+      setSnackbar({
+        open: true,
+        message: error.message || "Failed to send message",
+        severity: "error",
+      });
+      
+      // Remove the failed assistant message
+      setMessages((prev) => prev.slice(0, -1));
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const handleClearConversation = async () => {
+    try {
+      await clearDatabase();
+      setMessages([]);
+      setSnackbar({
+        open: true,
+        message: "Database cleared successfully",
+        severity: "success",
+      });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: "Failed to clear database",
+        severity: "error",
+      });
+    }
+  };
+
+  const handleShowReasoning = (steps: any[]) => {
+    setCurrentReasoning(steps);
+    setReasoningDrawerOpen(true);
+  };
+
+  const handleUploadSuccess = () => {
+    setSnackbar({
+      open: true,
+      message: "PDFs uploaded successfully!",
+      severity: "success",
     });
-    setPdfOpen(true);
+    
+    // Refresh health to get updated document count
+    getHealth().then(setHealth);
+  };
+
+  const handleMic = () => {
+    // Implement your speech recognition logic here
+    console.log("Mic clicked");
   };
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={darkMode ? darkTheme : lightTheme}>
+      <ThemeProvider theme={theme}>
         <CssBaseline />
-
         <Box
           sx={{
-            minHeight: "100vh",
+            height: "100vh",
             display: "flex",
             flexDirection: "column",
-            bgcolor: "background.default"
+            bgcolor: "background.default",
           }}
         >
-          {/* ---------- Header ---------- */}
-         <Header
-            health={health.data}
+          <Header
+            health={health}
             darkMode={darkMode}
             onToggleTheme={() => setDarkMode(!darkMode)}
             recursive={recursive}
-            onToggleRecursive={() => setRecursive((r) => !r)}
-            onOpenPlanner={() => setPlannerOpen(true)}
-            onUpload={handleUploadClick}   // ✅ FIXED
-            onClear={clear}
+            onToggleRecursive={() => setRecursive(!recursive)}
+            onOpenPlanner={() => setPlannerDrawerOpen(true)}
+            onUpload={handleUploadSuccess}
+            onClear={handleClearConversation}
           />
 
-
-
-          {/* ---------- Messages ---------- */}
-          <Box flex={1} overflow="auto">
-            <MessageList
-              messages={messages}
-              onShowReasoning={(steps) => {
-                setActiveReasoning(steps);
-                setReasoningOpen(true);
-              }}
-              onOpenSource={openPdf}
-            />
+          <Box
+            sx={{
+              flex: 1,
+              overflow: "auto",
+              position: "relative",
+            }}
+          >
+            {messages.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <>
+                <MessageList
+                  messages={messages}
+                  onShowReasoning={handleShowReasoning}
+                />
+                <div ref={messagesEndRef} />
+              </>
+            )}
           </Box>
 
-          {/* ---------- Input ---------- */}
-          <ChatInput onSend={handleSend} />
+          <ChatInput
+            value={input}
+            disabled={isStreaming}
+            isListening={false}
+            onChange={setInput}
+            onSend={handleSend}
+            onMic={handleMic}
+          />
 
-          {/* ---------- Drawers ---------- */}
+          {/* Upload Button (Floating) */}
+          <Box
+            sx={{
+              position: "fixed",
+              bottom: 80,
+              right: 20,
+              zIndex: 1000,
+            }}
+          >
+            <PdfUploadButton onSuccess={handleUploadSuccess} />
+          </Box>
+
+          {/* Reasoning Drawer */}
           <ReasoningDrawer
-            open={reasoningOpen}
-            onClose={() => setReasoningOpen(false)}
-            steps={activeReasoning}
-          />
-          <Snackbar
-             open={!!snack}
-             autoHideDuration={3000}
-             message={snack}
-             onClose={() => setSnack(null)}
+            open={reasoningDrawerOpen}
+            onClose={() => setReasoningDrawerOpen(false)}
+            steps={currentReasoning}
           />
 
+          {/* Planner Drawer */}
           <PlannerDrawer
-            open={plannerOpen}
-            onClose={() => setPlannerOpen(false)}
-            plan={plan}
-            steps={agentSteps}
+            open={plannerDrawerOpen}
+            onClose={() => setPlannerDrawerOpen(false)}
+            plan={[]}
+            steps={[]}
           />
-          <input
-             ref={fileInputRef}
-             type="file"
-             accept="application/pdf"
-             multiple
-             hidden
-             onChange={(e) => handleFilesSelected(e.target.files)}
-         />
 
-          <PdfDrawer
-            open={pdfOpen}
-            onClose={() => setPdfOpen(false)}
-            pdfUrl={pdfState.pdfUrl}
-            page={pdfState.page}
-            chunkText={pdfState.chunkText}
-          />
+          {/* Snackbar for notifications */}
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={4000}
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+          >
+            <Alert
+              onClose={() => setSnackbar({ ...snackbar, open: false })}
+              severity={snackbar.severity}
+              sx={{ width: "100%" }}
+            >
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
         </Box>
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
+
+export default App;

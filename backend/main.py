@@ -1,16 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Generator
 import chromadb
 from chromadb.utils import embedding_functions
 import PyPDF2
 import io
 import requests
 import json
-from typing import Generator
 from pathlib import Path
 import re
 
@@ -50,7 +49,6 @@ class ChatResponse(BaseModel):
     reasoning_steps: Optional[List[Dict]] = []
     recursion_depth: Optional[int] = 0
 
-    
 
 class RecursiveOllamaClient:
     def __init__(self, base_url: str = "http://localhost:11434"):
@@ -202,7 +200,7 @@ Provide a comprehensive answer based on the context."""
             
             direct_prompt = f"""Context: {context}
 
-Question: {request.message}
+Question: {query}
 
 Provide a clear and concise answer based on the context."""
             
@@ -284,6 +282,11 @@ If any issues, provide an improved version. If good, respond with: APPROVED"""
                 final_answer = reflection
         
         return final_answer, reasoning_steps
+
+
+# Initialize Ollama client
+ollama_client = RecursiveOllamaClient()
+
 
 def rag_chat_stream(request: ChatRequest) -> Generator[str, None, None]:
     """
@@ -400,6 +403,7 @@ Provide a clear answer based on the context."""
             "error": f"Streaming error: {str(e)}"
         })
 
+
 def extract_text_from_pdf(pdf_file: bytes) -> str:
     """Extract text from PDF file"""
     pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_file))
@@ -407,6 +411,7 @@ def extract_text_from_pdf(pdf_file: bytes) -> str:
     for page in pdf_reader.pages:
         text += page.extract_text() + "\n"
     return text
+
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
     """Split text into overlapping chunks"""
@@ -422,9 +427,11 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[st
     
     return chunks
 
+
 @app.get("/")
 async def root():
     return {"message": "Recursive RAG Chatbot API is running"}
+
 
 @app.post("/query")
 def query_rag(payload: dict):
@@ -435,6 +442,7 @@ def query_rag(payload: dict):
         "sources": [],
         "reasoning": []
     }
+
 
 @app.post("/upload-pdfs/")
 async def upload_pdfs(files: List[UploadFile] = File(...)):
@@ -472,11 +480,11 @@ async def upload_pdfs(files: List[UploadFile] = File(...)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    r
-from fastapi.responses import StreamingResponse
+
 
 @app.post("/api/chat/stream")
 def chat_stream(req: ChatRequest):
+    """Streaming chat endpoint"""
     def generator():
         for token in rag_chat_stream(req):
             yield f"data: {token}\n\n"
@@ -531,13 +539,16 @@ Provide a clear answer based on the context."""
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/vector-store/stats")
 def stats():
+    """Get vector store statistics"""
     return {
-        "documents": 12,
-        "chunks": 348,
-        "embedding_model": "nomic-embed-text"
+        "documents": collection.count(),
+        "chunks": collection.count(),
+        "embedding_model": "all-MiniLM-L6-v2"
     }
+
 
 @app.get("/health/")
 async def health_check():
@@ -556,6 +567,7 @@ async def health_check():
             "documents_count": collection.count()
         }
 
+
 @app.delete("/clear-database/")
 async def clear_database():
     """Clear all documents from the database"""
@@ -569,12 +581,15 @@ async def clear_database():
         return {"message": "Database cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
+# Mount static files for frontend
 app.mount(
     "/",
     StaticFiles(directory="./documents", html=True),
     name="frontend"
-)    
+)
+
 
 if __name__ == "__main__":
     import uvicorn
